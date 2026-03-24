@@ -208,3 +208,7 @@ __marimo__/
 
 documents/
 
+logs/
+*.log
+chroma_db/
+
