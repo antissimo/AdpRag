@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+langchain
+langchain-community
+langchain-chroma
+sentence-transformers
+chromadb
+requests
+python-dotenv
+unstructured
+markdown
