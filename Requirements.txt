@@ -9,3 +9,5 @@ requests
 python-dotenv
 unstructured
 markdown
+langchain_experimental
+langchain_huggingface

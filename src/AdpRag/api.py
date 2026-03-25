@@ -89,7 +89,7 @@ def ask(request: QuestionRequest):
     )
 
     if not docs_with_scores:
-        steps.append("❌ No relevant chunks found.")
+        steps.append("No relevant chunks found.")
         return QuestionResponse(
             question=question,
             answer="This information is not available in the internal documents.",

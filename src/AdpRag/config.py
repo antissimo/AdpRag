@@ -14,3 +14,7 @@ EMBED_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 OLLAMA_MODEL = "mistral"
 TOP_K = 5
 MIN_RELEVANCE = 0.3
+
+#Ingestion settings
+
+CHUNKING_THRESHOLD = 70 #percentile for chunking, LOWER means MORE chunks

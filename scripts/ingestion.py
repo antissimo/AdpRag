@@ -12,7 +12,7 @@ from AdpRag.vector_store import RAGVectorStore
 from AdpRag.config import CHROMA_DIR
 
 def main():
-    log.info("Starting setup...")
+    log.info("Starting ingestion...")
 
     chroma_path = Path(CHROMA_DIR)
     if chroma_path.exists():
