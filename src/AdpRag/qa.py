@@ -1,46 +1,35 @@
-# src/AdpRag/qa.py
-from langchain_community.llms import Ollama
 from langchain_core.prompts import PromptTemplate
-
-from langchain_classic.chains import RetrievalQA
-from .config import OLLAMA_MODEL, TOP_K, MIN_RELEVANCE
+from .llm import RAGLLM
 from .logger import FileLogger as log
+from .instructions import PROMPT_TEMPLATE
 
-# English prompt for RAG
-PROMPT_TEMPLATE = """You are an assistant that answers questions ONLY based on the internal company documents provided.
 
-Rules:
-- Answer ONLY using the context below.
-- If the information is not in the context, reply exactly: "This information is not available in the internal documents."
-- Be concise and precise.
-- Answer in the same language as the question.
+class SimpleQAChain:
+    def __init__(self):
+        self.llm = RAGLLM.get()
+        self.prompt = PromptTemplate(
+            template=PROMPT_TEMPLATE,
+            input_variables=["context", "question"]
+        )
+        log.info("Simple QA chain initialized (no retriever)")
 
-Context from documents:
-{context}
+    def invoke(self, question: str, docs: list):
+        # Combine documents into context
+        context = "\n\n".join([doc.page_content for doc in docs])
 
-Question: {question}
+        formatted_prompt = self.prompt.format(
+            context=context,
+            question=question
+        )
 
-Answer:"""
+        response = self.llm.invoke(formatted_prompt)
 
-def create_qa_chain(vectorstore):
-    """
-    Initialize the QA chain using the vectorstore and Ollama LLM.
-    """
-    llm = Ollama(model=OLLAMA_MODEL, temperature=0.1)
-    prompt = PromptTemplate(template=PROMPT_TEMPLATE, input_variables=["context", "question"])
-    
-    retriever = vectorstore.as_retriever(
-        search_type="similarity",
-        search_kwargs={"k": TOP_K}
-    )
-    
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        chain_type="stuff",
-        retriever=retriever,
-        return_source_documents=True,
-        chain_type_kwargs={"prompt": prompt},
-    )
+        return {
+            "result": response,
+            "source_documents": docs
+        }
 
-    log.info(f"QA chain created with model {OLLAMA_MODEL}")
-    return qa_chain
+
+def create_qa_chain(vectorstore=None):
+    # vectorstore no longer needed, but kept for compatibility
+    return SimpleQAChain()
