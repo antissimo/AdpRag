@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 from sentence_transformers import CrossEncoder
-from .config import CACHE_DIR
+from .config import CACHE_DIR, MIN_RELEVANCE
 from .logger import FileLogger as log
 from .llm import RAGLLM
 from .instructions import format_reranking_prompt
@@ -39,7 +39,8 @@ class RAGReranker:
             source = doc.metadata.get("source", "unknown")
             priority = self._get_priority_llm(source, doc.page_content)
             final_score = ce_score + (priority * 2)
-            results.append((doc, final_score))
+            if final_score >= MIN_RELEVANCE:
+                results.append((doc, final_score))
 
         results.sort(key=lambda x: x[1], reverse=True)
         return results[:top_k]

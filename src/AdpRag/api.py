@@ -11,6 +11,7 @@ from AdpRag.qa import create_qa_chain
 from AdpRag.reranker import RAGReranker
 from AdpRag.logger import FileLogger as log
 from AdpRag.config import CHROMA_DIR, TOP_K, RERANKER_TOP_K
+from AdpRag.query_transformer import QueryTransformer   
 
 # ── FastAPI initialization ────────────────────────────────────────────────
 app = FastAPI(
@@ -93,13 +94,17 @@ def ask(request: QuestionRequest):
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
 
     steps.append(f"Received question: \"{question}\"")
+    original_question = request.question.strip()
+    transformed_query = QueryTransformer.get().transform(original_question)
 
+    steps.append(f"Original question: {original_question}")
+    steps.append(f"Transformed query: {transformed_query}")
     # ── Step 1: Retrieval ─────────────────────────────────────
     initial_k = TOP_K
     steps.append(f"Retrieving top {initial_k} chunks from vector DB...")
 
     docs_with_scores = vectorstore.similarity_search_with_relevance_scores(
-        question, k=initial_k
+        transformed_query, k=initial_k
     )
 
     if not docs_with_scores:
