@@ -36,13 +36,60 @@ CRITICAL:
 Document filename: <<SOURCE>>
 """
 
+
+# ── Agent prompts ─────────────────────────────────────────────────────────
+
+AGENT_PLAN_PROMPT = """You are a search planning agent for a RAG document system.
+
+Your job is to analyze the user question and decide the search strategy.
+
+Rules:
+- If the question is SIMPLE (one specific fact) → use 1 query
+- If the question is COMPLEX (multi-step, checklist, comparison, summary) → use 2-3 queries
+- Queries should be short, keyword-focused, and cover different aspects of the question
+- Return ONLY valid JSON, no explanation, no markdown
+
+Return JSON:
+{{
+  "complexity": "simple" | "complex",
+  "reasoning": "<one sentence why>",
+  "queries": ["<query1>", "<query2>", ...]
+}}
+
+User question: {question}
+"""
+
+
+AGENT_EVALUATE_PROMPT = """You are evaluating whether collected document chunks are sufficient to answer a question.
+
+Question: {question}
+
+Document chunks collected so far:
+{context_preview}
+
+Iteration: {iteration} of {max_iterations}
+
+Rules:
+- If you have enough information to answer the question → set "enough" to true
+- If important information is clearly missing → set "enough" to false and provide a new search query
+- If this is the last iteration → you MUST set "enough" to true regardless
+- Return ONLY valid JSON, no explanation, no markdown
+
+Return JSON:
+{{
+  "enough": true | false,
+  "missing": "<what specific information is still missing, or 'nothing' if enough>",
+  "next_query": "<focused search query to find missing info, or null if enough>"
+}}
+"""
+
+
 def format_reranking_prompt(source: str) -> str:
     try:
         if not source:
             raise ValueError("Source is empty")
 
         prompt = RERANKING_PROMPT.replace("<<SOURCE>>", str(source))
-
         return prompt
 
     except Exception:
@@ -52,4 +99,3 @@ def format_reranking_prompt(source: str) -> str:
 
                 Filename: {source}
                 """
-

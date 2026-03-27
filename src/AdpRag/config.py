@@ -22,3 +22,6 @@ CHUNKING_THRESHOLD = 70 #percentile for chunking, LOWER means MORE chunks
 
 #Reranker settings
 CACHE_DIR = PROJECT_ROOT / ".cache"
+
+MAX_AGENT_ITERATIONS = 3       # max iterative retrieval rounds
+MAX_QUERIES_PER_ITERATION = 3  # max parallel queries agent can fire per round

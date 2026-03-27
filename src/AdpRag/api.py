@@ -10,14 +10,14 @@ from AdpRag.vector_store import RAGVectorStore
 from AdpRag.qa import create_qa_chain
 from AdpRag.reranker import RAGReranker
 from AdpRag.logger import FileLogger as log
-from AdpRag.config import CHROMA_DIR, TOP_K, RERANKER_TOP_K
-from AdpRag.query_transformer import QueryTransformer   
+from AdpRag.config import CHROMA_DIR, RERANKER_TOP_K
+from AdpRag.agent import RAGAgent
 
 # ── FastAPI initialization ────────────────────────────────────────────────
 app = FastAPI(
     title="Internal Docs Q&A API",
-    description="RAG system for answering questions from internal company documents.",
-    version="1.1.0",
+    description="Agentic RAG system for answering questions from internal company documents.",
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -48,17 +48,18 @@ class QuestionResponse(BaseModel):
     duration_seconds: float
 
 
-# ── Init ─────────────────────────────────────────────────────────────────
+# ── Init ──────────────────────────────────────────────────────────────────
 if not Path(CHROMA_DIR).exists():
     raise RuntimeError(f"ChromaDB does not exist ({CHROMA_DIR}). Run setup first!")
 
-rag_store = RAGVectorStore(chroma_dir=CHROMA_DIR)
+rag_store   = RAGVectorStore(chroma_dir=CHROMA_DIR)
 vectorstore = rag_store.load_vectorstore()
 
 qa_chain = create_qa_chain()
 reranker = RAGReranker.get()
+agent    = RAGAgent(vectorstore)
 
-log.info("API initialized successfully. Ready to serve questions.")
+log.info("API v2 initialized (agentic mode). Ready to serve questions.")
 
 
 # ── Routes ────────────────────────────────────────────────────────────────
@@ -66,11 +67,12 @@ log.info("API initialized successfully. Ready to serve questions.")
 def root():
     return {
         "status": "ok",
-        "message": "Internal Docs Q&A API",
+        "message": "Internal Docs Q&A API (Agentic RAG)",
+        "version": "2.0.0",
         "endpoints": {
-            "ask": "POST /ask",
+            "ask":    "POST /ask",
             "health": "GET /health",
-            "docs": "GET /docs",
+            "docs":   "GET /docs",
         },
     }
 
@@ -80,35 +82,25 @@ def health():
     return {
         "status": "ok",
         "chunks_in_db": vectorstore._collection.count(),
-        "chroma_dir": str(CHROMA_DIR),
+        "chroma_dir":   str(CHROMA_DIR),
     }
 
 
 @app.post("/ask", response_model=QuestionResponse)
 def ask(request: QuestionRequest):
     start_time = time()
-    steps = []
 
     question = request.question.strip()
     if not question:
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
 
-    steps.append(f"Received question: \"{question}\"")
-    original_question = request.question.strip()
-    transformed_query = QueryTransformer.get().transform(original_question)
-
-    steps.append(f"Original question: {original_question}")
-    steps.append(f"Transformed query: {transformed_query}")
-    # ── Step 1: Retrieval ─────────────────────────────────────
-    initial_k = TOP_K
-    steps.append(f"Retrieving top {initial_k} chunks from vector DB...")
-
-    docs_with_scores = vectorstore.similarity_search_with_relevance_scores(
-        transformed_query, k=initial_k
-    )
+    # ── Phase 1 & 2: Agent plans + retrieves iteratively ─────────────────
+    agent_result      = agent.run(question)
+    steps             = agent_result["steps"]
+    docs_with_scores  = agent_result["docs_with_scores"]
 
     if not docs_with_scores:
-        steps.append("No relevant chunks found.")
+        steps.append("❌ No relevant chunks found after all iterations.")
         return QuestionResponse(
             question=question,
             answer="This information is not available in the internal documents.",
@@ -118,61 +110,58 @@ def ask(request: QuestionRequest):
             duration_seconds=round(time() - start_time, 2),
         )
 
-    # ── Step 2: Reranking ─────────────────────────────────────
-    steps.append("Reranking documents...")
+    # ── Phase 3: Reranking ────────────────────────────────────────────────
+    steps.append(f"⚖️  [Reranker] Reranking {len(docs_with_scores)} chunks → keeping top {RERANKER_TOP_K}...")
     try:
         docs_with_scores = reranker.rerank(
             question,
             docs_with_scores,
-            top_k=RERANKER_TOP_K
+            top_k=RERANKER_TOP_K,
         )
+        for doc, score in docs_with_scores:
+            src = doc.metadata.get("source", "unknown")
+            steps.append(f"   📄 {src} — final score: {score:.3f}")
     except Exception as e:
         log.warning(f"Reranker failed: {e}")
+        steps.append(f"   ⚠️  Reranker failed ({e}), using unranked docs")
 
-    for doc, score in docs_with_scores:
-        src = doc.metadata.get("source", "unknown")
-        steps.append(f"  📄 {src} — final score: {score:.3f}")
-
-    # ── Step 3: QA ────────────────────────────────────────────
-    steps.append("Generating answer via LLM...")
-
+    # ── Phase 4: Answer generation ────────────────────────────────────────
+    steps.append("💬 [LLM] Generating answer from collected context...")
     reranked_docs = [doc for doc, _ in docs_with_scores]
+    result        = qa_chain.invoke(question, reranked_docs)
+    answer        = result["result"].strip()
+    source_docs   = result["source_documents"]
 
-    result = qa_chain.invoke(question, reranked_docs)
-    answer = result["result"].strip()
-    source_docs = result["source_documents"]
-
-    # ── Step 4: Sources ───────────────────────────────────────
-    seen = set()
-    sources = []
+    # ── Phase 5: Build sources list ───────────────────────────────────────
+    seen      = set()
+    sources   = []
     score_map = {id(doc): score for doc, score in docs_with_scores}
 
     for doc in source_docs:
-        src = doc.metadata.get("source", "unknown")
+        src     = doc.metadata.get("source", "unknown")
         preview = doc.page_content[:120].replace("\n", " ").strip() + "..."
-        key = (src, preview[:40])
+        key     = (src, preview[:40])
 
         if key not in seen:
             seen.add(key)
             sources.append(SourceInfo(
                 document=src,
                 chunk_preview=preview,
-                relevance_score=round(score_map.get(id(doc), 0.0), 3)
+                relevance_score=round(score_map.get(id(doc), 0.0), 3),
             ))
 
-    # ── Step 5: Validation ────────────────────────────────────
+    # ── Phase 6: Validate answer ──────────────────────────────────────────
     not_found_phrases = [
         "not available",
         "cannot find",
         "no information",
         "not found",
     ]
-
     found_in_docs = not any(p in answer.lower() for p in not_found_phrases)
-    steps.append(f"Answer generated. Found in documents: {found_in_docs}")
 
     duration = round(time() - start_time, 2)
-    steps.append(f"✅ Finished in {duration}s. Used {len(sources)} sources.")
+    steps.append(f"✅ [Done] Answer generated. Found in docs: {found_in_docs}. Used {len(sources)} sources.")
+    steps.append(f"⏱️  Total duration: {duration}s")
 
     return QuestionResponse(
         question=question,
