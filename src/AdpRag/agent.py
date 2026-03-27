@@ -2,7 +2,6 @@
 
 from .llm import RAGLLM
 from .logger import FileLogger as log
-from .helpers import parse_llm_json
 from .instructions import AGENT_PLAN_PROMPT, AGENT_EVALUATE_PROMPT
 from .config import MAX_AGENT_ITERATIONS, MAX_QUERIES_PER_ITERATION, TOP_K
 
@@ -13,7 +12,7 @@ class RAGAgent:
       1. Plans how many queries to fire based on question complexity
       2. Executes queries against the vector store
       3. Evaluates if collected docs are sufficient
-      4. If not, generates a new query and repeats (iterative retrieval)
+      4. If not, generates a NEW (different) query and repeats
       5. Returns all collected docs + detailed steps for frontend display
     """
 
@@ -21,8 +20,6 @@ class RAGAgent:
 
     @classmethod
     def get(cls, vectorstore):
-        # Not a true singleton since vectorstore is injected,
-        # but reuse instance if already created
         if cls._instance is None:
             cls._instance = cls(vectorstore)
         return cls._instance
@@ -41,12 +38,13 @@ class RAGAgent:
         Returns:
             {
                 "docs_with_scores": [...],  # (Document, float) pairs
-                "steps": [...],             # list of human-readable step strings
+                "steps": [...],             # human-readable steps for frontend
             }
         """
-        steps = []
-        all_docs_with_scores: list[tuple] = []
-        seen_contents: set[str] = set()  # deduplicate chunks across iterations
+        steps: list[str]        = []
+        all_docs_with_scores    = []
+        seen_contents: set[str] = set()
+        tried_queries: list[str] = []  # track all queries to prevent loops
 
         # ── Phase 1: Planning ─────────────────────────────────────────────
         steps.append("🤖 [Agent] Analyzing question complexity and planning search strategy...")
@@ -64,6 +62,7 @@ class RAGAgent:
         # ── Phase 2: Initial retrieval ────────────────────────────────────
         steps.append("🔍 [Agent] Executing initial queries against vector store...")
         new_docs = self._execute_queries(queries, steps)
+        tried_queries.extend(queries)
         all_docs_with_scores = self._merge_docs(all_docs_with_scores, new_docs, seen_contents, steps)
 
         # ── Phase 3: Iterative retrieval loop ─────────────────────────────
@@ -75,11 +74,12 @@ class RAGAgent:
                 docs_with_scores=all_docs_with_scores,
                 iteration=iteration,
                 max_iterations=MAX_AGENT_ITERATIONS,
+                previous_queries=tried_queries,
             )
 
-            enough      = evaluation.get("enough", True)
-            missing     = evaluation.get("missing", "nothing")
-            next_query  = evaluation.get("next_query")
+            enough     = evaluation.get("enough", True)
+            missing    = evaluation.get("missing", "nothing")
+            next_query = evaluation.get("next_query")
 
             if enough:
                 steps.append(f"✅ [Agent] Context is sufficient after iteration {iteration}. Proceeding to answer generation.")
@@ -91,8 +91,14 @@ class RAGAgent:
                 steps.append("⚠️  [Agent] No follow-up query suggested. Stopping iterations.")
                 break
 
+            # Guard: don't repeat a query we already tried
+            if next_query in tried_queries:
+                steps.append(f"⚠️  [Agent] Suggested query already tried: \"{next_query}\". Stopping to avoid loop.")
+                break
+
             steps.append(f"➕ [Agent] Follow-up query: \"{next_query}\"")
             extra_docs = self._execute_queries([next_query], steps)
+            tried_queries.append(next_query)
             all_docs_with_scores = self._merge_docs(all_docs_with_scores, extra_docs, seen_contents, steps)
 
         steps.append(f"📦 [Agent] Total unique chunks collected: {len(all_docs_with_scores)}")
@@ -106,18 +112,13 @@ class RAGAgent:
 
     def _plan(self, question: str) -> dict:
         """Ask LLM to plan the search strategy."""
+        import json, re
         prompt = AGENT_PLAN_PROMPT.format(question=question)
         try:
             response = self.llm.invoke(prompt)
-            parsed = parse_llm_json(response)
-
-            # parse_llm_json only extracts priority/reason by default,
-            # so we do a raw JSON parse here for the richer plan structure
-            import json, re
             match = re.search(r'\{.*\}', response, re.DOTALL)
             if match:
-                data = json.loads(match.group(0))
-                # Sanitize queries list
+                data    = json.loads(match.group(0))
                 queries = data.get("queries", [question])
                 if not isinstance(queries, list) or not queries:
                     queries = [question]
@@ -131,9 +132,18 @@ class RAGAgent:
 
         return {"complexity": "simple", "reasoning": "fallback", "queries": [question]}
 
-    def _evaluate(self, question: str, docs_with_scores: list, iteration: int, max_iterations: int) -> dict:
+    def _evaluate(
+        self,
+        question: str,
+        docs_with_scores: list,
+        iteration: int,
+        max_iterations: int,
+        previous_queries: list[str],
+    ) -> dict:
         """Ask LLM if we have enough context or need another query."""
-        # Build a short preview of collected context (avoid huge prompts)
+        import json, re
+
+        # Short preview of collected context to keep prompt size manageable
         preview_parts = []
         for doc, score in docs_with_scores[:6]:
             src     = doc.metadata.get("source", "unknown")
@@ -146,11 +156,11 @@ class RAGAgent:
             context_preview=context_preview,
             iteration=iteration,
             max_iterations=max_iterations,
+            previous_queries=", ".join(f'"{q}"' for q in previous_queries),
         )
 
         try:
             response = self.llm.invoke(prompt)
-            import json, re
             match = re.search(r'\{.*\}', response, re.DOTALL)
             if match:
                 data = json.loads(match.group(0))
@@ -165,7 +175,7 @@ class RAGAgent:
         return {"enough": True, "missing": "nothing", "next_query": None}
 
     def _execute_queries(self, queries: list[str], steps: list) -> list[tuple]:
-        """Run one or more queries against the vector store, return (doc, score) pairs."""
+        """Run one or more queries against the vector store."""
         results = []
         for query in queries:
             try:
@@ -174,7 +184,7 @@ class RAGAgent:
                 results.extend(hits)
             except Exception as e:
                 log.warning(f"Vector search failed for query '{query}': {e}")
-                steps.append(f"   ❌ Vector search failed for: \"{query}\" — {e}")
+                steps.append(f"   ❌ Vector search failed: \"{query}\" — {e}")
         return results
 
     def _merge_docs(
@@ -184,11 +194,7 @@ class RAGAgent:
         seen: set,
         steps: list,
     ) -> list[tuple]:
-        """
-        Merge new docs into existing list, deduplicating by content.
-        When the same chunk appears multiple times (from different queries),
-        keep the entry with the highest score.
-        """
+        """Merge new docs into existing, deduplicating by content, keeping highest score."""
         score_map: dict[str, tuple] = {doc.page_content: (doc, score) for doc, score in existing}
         added = 0
 
@@ -199,9 +205,8 @@ class RAGAgent:
                 score_map[key] = (doc, score)
                 added += 1
             else:
-                # Keep highest score
-                existing_score = score_map[key][1]
-                if score > existing_score:
+                # Keep highest score for duplicate chunks
+                if score > score_map[key][1]:
                     score_map[key] = (doc, score)
 
         steps.append(f"   ✨ {added} new unique chunks added (duplicates merged)")

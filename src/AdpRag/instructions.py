@@ -14,26 +14,43 @@ Question: {question}
 Answer:"""
 
 
-RERANKING_PROMPT = """
-You are ranking document reliability and authority.
+# ── Chunk quality prompt (used at ingestion time) ─────────────────────────
 
-You are ONLY given the document filename.
-You MUST infer how final, official, and trustworthy it is.
+CHUNK_QUALITY_PROMPT = """You are evaluating the quality of a document chunk for a company knowledge base.
 
-Return ONLY JSON:
-{{"priority": <float 0.0-1.0>, "reason": "<one sentence>"}}
+You are given:
+1. The filename of the document
+2. The text content of the chunk
 
-Scoring rules:
-- 1.0 → official, finalized, authoritative document (approved policy)
+Your job is to assess TWO things:
+A) Is the CONTENT meaningful, readable, real human language? (not gibberish, not random words)
+B) Is the DOCUMENT reliable and authoritative based on the filename?
+
+Scoring rules for content quality:
+- 0.9–1.0 → clear, structured, informative text (policies, procedures, guidelines)
+- 0.6–0.8 → readable but vague or incomplete
+- 0.3–0.5 → partial gibberish, very low information density
+- 0.0–0.2 → pure gibberish, random words, nonsense, unreadable
+
+Scoring rules for document reliability (filename):
+- 1.0 → official, finalized, authoritative (policy, approved, final)
 - 0.7–0.9 → mostly reliable
-- 0.4–0.6 → draft / unclear
+- 0.4–0.6 → draft, unclear status
 - 0.1–0.3 → low reliability
 
-CRITICAL:
-- If filename contains "wip", "draft", "test", "tmp" → priority MUST be <= 0.4
-- Prefer clean names like "policy", "official", "final"
+CRITICAL rules:
+- If filename contains "wip", "draft", "test", "tmp" → doc_score MUST be <= 0.4
+- If content contains mostly invented/random words with no real meaning → content_score MUST be <= 0.2
+- Random sequences like "velm zortha quillex mortri venzak" are gibberish → content_score: 0.0
 
-Document filename: <<SOURCE>>
+Final quality_score = (content_score * 0.7) + (doc_score * 0.3)
+
+Return ONLY valid JSON, no explanation, no markdown:
+{{"content_score": <float 0.0-1.0>, "doc_score": <float 0.0-1.0>, "quality_score": <float 0.0-1.0>, "reason": "<one sentence>"}}
+
+Filename: {filename}
+Content:
+{content}
 """
 
 
@@ -68,10 +85,12 @@ Document chunks collected so far:
 {context_preview}
 
 Iteration: {iteration} of {max_iterations}
+Queries already tried: {previous_queries}
 
 Rules:
 - If you have enough information to answer the question → set "enough" to true
-- If important information is clearly missing → set "enough" to false and provide a new search query
+- If important information is clearly missing → set "enough" to false and provide a NEW search query
+- The new query MUST be meaningfully different from all queries already tried
 - If this is the last iteration → you MUST set "enough" to true regardless
 - Return ONLY valid JSON, no explanation, no markdown
 
@@ -82,20 +101,3 @@ Return JSON:
   "next_query": "<focused search query to find missing info, or null if enough>"
 }}
 """
-
-
-def format_reranking_prompt(source: str) -> str:
-    try:
-        if not source:
-            raise ValueError("Source is empty")
-
-        prompt = RERANKING_PROMPT.replace("<<SOURCE>>", str(source))
-        return prompt
-
-    except Exception:
-        return f"""
-                Return JSON:
-                {{"priority": 0.5, "reason": "fallback"}}
-
-                Filename: {source}
-                """
