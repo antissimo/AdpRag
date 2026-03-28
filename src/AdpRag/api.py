@@ -48,6 +48,17 @@ class QuestionResponse(BaseModel):
     duration_seconds: float
 
 
+# ── Dynamic top_k based on complexity ────────────────────────────────────
+SIMPLE_TOP_K  = 3   # single fact questions need fewer chunks
+COMPLEX_TOP_K = 8   # checklists, summaries, multi-step questions need more
+
+
+def get_top_k(complexity: str, override: int | None = None) -> int:
+    if override is not None:
+        return override
+    return COMPLEX_TOP_K if complexity == "complex" else SIMPLE_TOP_K
+
+
 # ── Init ──────────────────────────────────────────────────────────────────
 if not Path(CHROMA_DIR).exists():
     raise RuntimeError(f"ChromaDB does not exist ({CHROMA_DIR}). Run setup first!")
@@ -95,9 +106,10 @@ def ask(request: QuestionRequest):
         raise HTTPException(status_code=400, detail="Question cannot be empty.")
 
     # ── Phase 1 & 2: Agent plans + retrieves iteratively ─────────────────
-    agent_result      = agent.run(question)
-    steps             = agent_result["steps"]
-    docs_with_scores  = agent_result["docs_with_scores"]
+    agent_result     = agent.run(question)
+    steps            = agent_result["steps"]
+    docs_with_scores = agent_result["docs_with_scores"]
+    complexity       = agent_result["complexity"]
 
     if not docs_with_scores:
         steps.append("❌ No relevant chunks found after all iterations.")
@@ -110,14 +122,12 @@ def ask(request: QuestionRequest):
             duration_seconds=round(time() - start_time, 2),
         )
 
-    # ── Phase 3: Reranking ────────────────────────────────────────────────
-    steps.append(f"⚖️  [Reranker] Reranking {len(docs_with_scores)} chunks → keeping top {RERANKER_TOP_K}...")
+    # ── Phase 3: Reranking with dynamic top_k ────────────────────────────
+    top_k = get_top_k(complexity, override=request.top_k)
+    steps.append(f"⚖️  [Reranker] Complexity={complexity} → top_k={top_k}. Reranking {len(docs_with_scores)} chunks...")
+
     try:
-        docs_with_scores = reranker.rerank(
-            question,
-            docs_with_scores,
-            top_k=RERANKER_TOP_K,
-        )
+        docs_with_scores = reranker.rerank(question, docs_with_scores, top_k=top_k)
         for doc, score in docs_with_scores:
             src = doc.metadata.get("source", "unknown")
             steps.append(f"   📄 {src} — final score: {score:.3f}")
@@ -133,9 +143,10 @@ def ask(request: QuestionRequest):
     source_docs   = result["source_documents"]
 
     # ── Phase 5: Build sources list ───────────────────────────────────────
+    # Use content hash as key instead of id() which can be recycled by Python
     seen      = set()
     sources   = []
-    score_map = {id(doc): score for doc, score in docs_with_scores}
+    score_map = {hash(doc.page_content[:100]): score for doc, score in docs_with_scores}
 
     for doc in source_docs:
         src     = doc.metadata.get("source", "unknown")
@@ -147,20 +158,28 @@ def ask(request: QuestionRequest):
             sources.append(SourceInfo(
                 document=src,
                 chunk_preview=preview,
-                relevance_score=round(score_map.get(id(doc), 0.0), 3),
+                relevance_score=round(score_map.get(hash(doc.page_content[:100]), 0.0), 3),
             ))
 
-    # ── Phase 6: Validate answer ──────────────────────────────────────────
+    # ── Phase 6: Determine found_in_docs ─────────────────────────────────
+    # Don't rely purely on phrase matching — also check if we actually have sources.
+    # If LLM says "not available" but we have sources, trust the sources.
     not_found_phrases = [
-        "not available",
+        "not available in the internal documents",
         "cannot find",
         "no information",
-        "not found",
+        "not found in the documents",
+        "not mentioned in",
+        "no relevant information",
     ]
-    found_in_docs = not any(p in answer.lower() for p in not_found_phrases)
+    llm_says_not_found = any(p in answer.lower() for p in not_found_phrases)
+
+    # found_in_docs is True only if LLM didn't say not-found AND we have sources
+    found_in_docs = not llm_says_not_found and len(sources) > 0
+
+    steps.append(f"✅ [Done] found_in_docs={found_in_docs} (llm_says_not_found={llm_says_not_found}, sources={len(sources)})")
 
     duration = round(time() - start_time, 2)
-    steps.append(f"✅ [Done] Answer generated. Found in docs: {found_in_docs}. Used {len(sources)} sources.")
     steps.append(f"⏱️  Total duration: {duration}s")
 
     return QuestionResponse(

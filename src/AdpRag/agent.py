@@ -13,7 +13,7 @@ class RAGAgent:
       2. Executes queries against the vector store
       3. Evaluates if collected docs are sufficient
       4. If not, generates a NEW (different) query and repeats
-      5. Returns all collected docs + detailed steps for frontend display
+      5. Returns all collected docs + complexity + detailed steps for frontend display
     """
 
     _instance = None
@@ -37,14 +37,15 @@ class RAGAgent:
 
         Returns:
             {
-                "docs_with_scores": [...],  # (Document, float) pairs
-                "steps": [...],             # human-readable steps for frontend
+                "docs_with_scores": [...],   # (Document, float) pairs
+                "complexity": "simple" | "complex",
+                "steps": [...],              # human-readable steps for frontend
             }
         """
-        steps: list[str]        = []
-        all_docs_with_scores    = []
-        seen_contents: set[str] = set()
-        tried_queries: list[str] = []  # track all queries to prevent loops
+        steps: list[str]         = []
+        all_docs_with_scores     = []
+        seen_contents: set[str]  = set()
+        tried_queries: list[str] = []
 
         # ── Phase 1: Planning ─────────────────────────────────────────────
         steps.append("🤖 [Agent] Analyzing question complexity and planning search strategy...")
@@ -91,7 +92,6 @@ class RAGAgent:
                 steps.append("⚠️  [Agent] No follow-up query suggested. Stopping iterations.")
                 break
 
-            # Guard: don't repeat a query we already tried
             if next_query in tried_queries:
                 steps.append(f"⚠️  [Agent] Suggested query already tried: \"{next_query}\". Stopping to avoid loop.")
                 break
@@ -105,7 +105,8 @@ class RAGAgent:
 
         return {
             "docs_with_scores": all_docs_with_scores,
-            "steps": steps,
+            "complexity":       complexity,   # expose to api.py for dynamic top_k
+            "steps":            steps,
         }
 
     # ── Private helpers ───────────────────────────────────────────────────
@@ -143,7 +144,6 @@ class RAGAgent:
         """Ask LLM if we have enough context or need another query."""
         import json, re
 
-        # Short preview of collected context to keep prompt size manageable
         preview_parts = []
         for doc, score in docs_with_scores[:6]:
             src     = doc.metadata.get("source", "unknown")
@@ -205,7 +205,6 @@ class RAGAgent:
                 score_map[key] = (doc, score)
                 added += 1
             else:
-                # Keep highest score for duplicate chunks
                 if score > score_map[key][1]:
                     score_map[key] = (doc, score)
 
