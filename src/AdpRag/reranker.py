@@ -3,7 +3,7 @@
 from sentence_transformers import CrossEncoder
 from .config import MIN_RELEVANCE
 from .logger import FileLogger as log
-from .config import QUALITY_SCORE_WEIGHT, CROSS_ENCODER_VALUE_WEIGHT
+from .config import QUALITY_SCORE_WEIGHT, CROSS_ENCODER_WEIGHT
 
 class RAGReranker:
 
@@ -34,7 +34,7 @@ class RAGReranker:
         results = []
         for doc, ce_score in zip(docs, ce_scores):
             quality_score = float(doc.metadata.get("quality_score", 0.5))
-            final_score   = (ce_score * CROSS_ENCODER_VALUE_WEIGHT) + (quality_score * QUALITY_SCORE_WEIGHT )
+            final_score   = (ce_score * CROSS_ENCODER_WEIGHT) + (quality_score * QUALITY_SCORE_WEIGHT )
 
             log.info(
                 f"  [{doc.metadata.get('source', '?')}] "

@@ -10,7 +10,7 @@ from AdpRag.vector_store import RAGVectorStore
 from AdpRag.qa import create_qa_chain
 from AdpRag.reranker import RAGReranker
 from AdpRag.logger import FileLogger as log
-from AdpRag.config import CHROMA_DIR, RERANKER_TOP_K
+from AdpRag.config import CHROMA_DIR
 from AdpRag.agent import RAGAgent
 
 # ── FastAPI initialization ────────────────────────────────────────────────

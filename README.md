@@ -91,7 +91,7 @@ documents/*.md
       │
       ▼
   Quality Filter
-  Chunks below quality_score 0.25 are dropped entirely.
+  Chunks below QUALITY_DROP_THRESHOLD are dropped entirely.
   Garbage documents never enter the vector store.
       │
       ▼
@@ -146,7 +146,7 @@ Retrieved chunks are reranked using two signals:
 | CrossEncoder score | `cross-encoder/ms-marco-MiniLM-L-6-v2` — measures how well the chunk answers the query | 70% |
 | Quality score | Pre-computed at ingestion, stored in chunk metadata | 30% |
 
-Both scores are normalized to [0, 1] before combining so neither dominates by scale alone.
+Both scores are normalized to [0, 1] before combining so neither dominates by scale.
 
 **Dynamic top-K:** Simple questions keep the top 3 chunks. Complex questions keep the top 8. This prevents irrelevant chunks from diluting the context for straightforward questions.
 
@@ -154,13 +154,13 @@ Both scores are normalized to [0, 1] before combining so neither dominates by sc
 
 ## Garbage Document Handling
 
-The test dataset intentionally includes nonsense `.md` files (e.g., documents filled with random invented words). The system handles these at two levels:
+The system handles nonsense or low-quality documents at two levels:
 
-1. **Ingestion time** — LLM assigns a near-zero `content_score` to gibberish content. Combined with `doc_score` from the filename, `quality_score` falls below the drop threshold and the chunk is never stored.
+1. **Ingestion time** — LLM assigns a near-zero `content_score` to gibberish. Combined `quality_score` falls below the drop threshold and the chunk is never stored.
 
-2. **Query time** — Even if a low-quality chunk somehow enters the store, its `quality_score` in the reranker formula penalizes its final ranking, pushing it below top-K.
+2. **Query time** — Even if a low-quality chunk enters the store, its `quality_score` penalizes its reranker ranking, pushing it out of top-K.
 
-If a user explicitly asks about a nonsense document (*"Summarize the Krzth Monolithic Reference"*), the system correctly responds that the information is not available — it does not hallucinate an interpretation of gibberish.
+If a user asks about a nonsense document (*"Summarize the Krzth Monolithic Reference"*), the system correctly responds that the information is not available — it does not hallucinate an interpretation of gibberish.
 
 ---
 
@@ -230,24 +230,6 @@ scripts/
 
 ---
 
-## Configuration
-
-All tuneable parameters are in `config.py`:
-
-| Parameter | Default | Description |
-|---|---|---|
-| `OLLAMA_MODEL` | `mistral` | LLM used for planning, evaluation, and answering |
-| `EMBED_MODEL` | `all-MiniLM-L6-v2` | Embedding model for vector search |
-| `TOP_K` | `15` | Chunks retrieved per vector search query |
-| `RERANKER_TOP_K` | `5` | Fallback top-K for reranker |
-| `MIN_RELEVANCE` | `0.3` | Minimum final score to keep a chunk |
-| `CHUNKING_THRESHOLD` | `70` | Semantic chunking sensitivity (lower = more chunks) |
-| `MAX_AGENT_ITERATIONS` | `3` | Maximum iterative retrieval rounds |
-| `MAX_QUERIES_PER_ITERATION` | `3` | Maximum parallel queries per round |
-| `TEMPERATURE` | `0.1` | LLM temperature (low = more deterministic) |
-
----
-
 ## Setup & Running
 
 **Prerequisites:** Python 3.11+, [Ollama](https://ollama.ai) running locally with Mistral pulled.
@@ -259,15 +241,62 @@ pip install -e .
 # Pull the LLM
 ollama pull mistral
 
-# Ingest documents (run once, or when documents change)
+# Ingest documents (run once, or whenever documents change)
 python scripts/ingestion.py
 
 # Start the API
 uvicorn AdpRag.api:app --reload
 
-# API available at http://localhost:8000
+# API available at    http://localhost:8000
 # Interactive docs at http://localhost:8000/docs
 ```
+
+---
+
+## Tuning Guide
+
+All parameters are in `config.py`. Here is what to change and when.
+
+### Retrieval quality is poor — answers miss relevant information
+
+| Parameter | Change | Effect |
+|---|---|---|
+| `TOP_K` | Increase (e.g. 20) | Fetches more candidates before reranking |
+| `CHUNKING_THRESHOLD` | Decrease (e.g. 60) | Creates finer chunks, better semantic precision |
+| `MAX_AGENT_ITERATIONS` | Increase (e.g. 4) | Agent gets more rounds to find missing context |
+| `MAX_QUERIES_PER_ITERATION` | Increase (e.g. 4) | Agent generates more diverse initial queries |
+
+### Too much irrelevant content reaching the LLM
+
+| Parameter | Change | Effect |
+|---|---|---|
+| `MIN_RELEVANCE` | Increase (e.g. 0.5) | Stricter cutoff, fewer chunks pass reranking |
+| `CHUNKING_THRESHOLD` | Increase (e.g. 85) | Larger chunks, fewer but more self-contained |
+| `CROSS_ENCODER_WEIGHT` | Increase (e.g. 0.8) | Relevance matters more than document quality |
+
+### Garbage or low-quality documents are getting through
+
+| Parameter | Change | Effect |
+|---|---|---|
+| `QUALITY_DROP_THRESHOLD` | Increase (e.g. 0.4) | Stricter filter, more chunks dropped at ingestion |
+| `QUALITY_SCORE_WEIGHT` | Increase (e.g. 0.4) | Quality penalizes bad docs more at reranking |
+
+> **Note:** After changing any ingestion parameter (`CHUNKING_THRESHOLD`, `QUALITY_DROP_THRESHOLD`), you must re-run `ingestion.py` to rebuild the vector database.
+
+### Responses are too slow
+
+| Parameter | Change | Effect |
+|---|---|---|
+| `MAX_AGENT_ITERATIONS` | Decrease (e.g. 2) | Fewer LLM evaluation rounds |
+| `MAX_QUERIES_PER_ITERATION` | Decrease (e.g. 2) | Fewer initial queries |
+| `TOP_K` | Decrease (e.g. 10) | Fewer chunks through reranker |
+| `OLLAMA_MODEL` | Use smaller model | Faster inference, lower quality |
+
+### LLM gives inconsistent or hallucinated answers
+
+| Parameter | Change | Effect |
+|---|---|---|
+| `TEMPERATURE` | Decrease (e.g. 0.05) | More deterministic, less creative output |
 
 ---
 
