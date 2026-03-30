@@ -6,14 +6,41 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="container">
-        <h1>Internal Docs Q&A</h1>
-        <textarea id="question" placeholder="Type your question here..."></textarea>
-        <button id="askBtn">Ask</button>
-        <div id="answer"></div>
-        <div id="sources"></div>
-        <div id="steps"></div>
+    <div class="layout">
+        <!-- LEFT: Main chat -->
+        <div class="main-panel">
+            <h1>Internal Docs Q&amp;A</h1>
+            <textarea id="question" placeholder="Type your question here..."></textarea>
+            <button id="askBtn">Ask</button>
+
+            <div id="answer"></div>
+
+            <details id="stepsDetails" style="display:none">
+                <summary>Steps</summary>
+                <div id="steps"></div>
+            </details>
+        </div>
+
+        <!-- RIGHT: Sources panel -->
+        <div class="sources-panel">
+            <h2>Sources</h2>
+            <p class="sources-empty" id="sourcesEmpty">No sources yet.</p>
+            <div id="sourcesList"></div>
+        </div>
     </div>
+
+    <!-- Modal for full chunk text -->
+    <div id="modal" class="modal-overlay" style="display:none">
+        <div class="modal-box">
+            <div class="modal-header">
+                <span id="modalTitle"></span>
+                <button class="modal-close" id="modalClose">✕</button>
+            </div>
+            <div class="modal-score" id="modalScore"></div>
+            <pre id="modalContent"></pre>
+        </div>
+    </div>
+
     <script src="script.js"></script>
 </body>
 </html>

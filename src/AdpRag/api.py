@@ -36,6 +36,7 @@ class QuestionRequest(BaseModel):
 class SourceInfo(BaseModel):
     document: str
     chunk_preview: str
+    full_text: str  
     relevance_score: float | None = None
 
 
@@ -158,6 +159,7 @@ def ask(request: QuestionRequest):
             sources.append(SourceInfo(
                 document=src,
                 chunk_preview=preview,
+                full_text=doc.page_content,
                 relevance_score=round(score_map.get(hash(doc.page_content[:100]), 0.0), 3),
             ))
 

@@ -1,54 +1,241 @@
-body {
-    font-family: Arial, sans-serif;
-    background: #f4f4f9;
+* {
+    box-sizing: border-box;
     margin: 0;
     padding: 0;
 }
 
-.container {
-    max-width: 700px;
-    margin: 50px auto;
+body {
+    font-family: Arial, sans-serif;
+    background: #f4f4f9;
+    min-height: 100vh;
+}
+
+/* ── Two-column layout ─────────────────────────── */
+.layout {
+    display: flex;
+    gap: 20px;
+    max-width: 1100px;
+    margin: 40px auto;
+    padding: 0 20px;
+    align-items: flex-start;
+}
+
+/* ── Main chat panel ───────────────────────────── */
+.main-panel {
+    flex: 1;
     background: white;
-    padding: 20px;
+    padding: 24px;
     border-radius: 10px;
     box-shadow: 0 0 15px rgba(0,0,0,0.1);
+}
+
+.main-panel h1 {
+    font-size: 22px;
+    margin-bottom: 16px;
+    color: #222;
 }
 
 textarea {
     width: 100%;
     height: 100px;
     padding: 10px;
-    font-size: 16px;
+    font-size: 15px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    resize: vertical;
     margin-bottom: 10px;
 }
 
-button {
-    padding: 10px 20px;
-    font-size: 16px;
+textarea:focus {
+    outline: none;
+    border-color: #4CAF50;
+}
+
+button#askBtn {
+    padding: 10px 24px;
+    font-size: 15px;
     background: #4CAF50;
     color: white;
     border: none;
-    border-radius: 5px;
+    border-radius: 6px;
     cursor: pointer;
+    transition: background 0.2s;
 }
 
-button:hover {
+button#askBtn:hover {
     background: #45a049;
+}
+
+button#askBtn:disabled {
+    background: #aaa;
+    cursor: not-allowed;
 }
 
 #answer {
     margin-top: 20px;
-    font-weight: bold;
+    font-size: 15px;
+    line-height: 1.6;
+    color: #222;
 }
 
-#sources {
-    margin-top: 10px;
-    font-size: 14px;
-    color: #555;
+/* ── Steps ─────────────────────────────────────── */
+details {
+    margin-top: 16px;
+}
+
+details summary {
+    font-size: 12px;
+    color: #999;
+    cursor: pointer;
+    user-select: none;
 }
 
 #steps {
-    margin-top: 15px;
+    margin-top: 8px;
     font-size: 12px;
     color: #999;
+    line-height: 1.7;
+}
+
+/* ── Sources panel ─────────────────────────────── */
+.sources-panel {
+    width: 280px;
+    flex-shrink: 0;
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    box-shadow: 0 0 15px rgba(0,0,0,0.1);
+}
+
+.sources-panel h2 {
+    font-size: 15px;
+    color: #333;
+    margin-bottom: 12px;
+    border-bottom: 1px solid #eee;
+    padding-bottom: 8px;
+}
+
+.sources-empty {
+    font-size: 13px;
+    color: #bbb;
+}
+
+/* ── Source card ───────────────────────────────── */
+.source-card {
+    background: #f9f9f9;
+    border: 1px solid #e8e8e8;
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.source-card:hover {
+    border-color: #4CAF50;
+    box-shadow: 0 2px 8px rgba(76,175,80,0.15);
+}
+
+.source-card .source-name {
+    font-size: 13px;
+    font-weight: bold;
+    color: #333;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.source-card .source-score {
+    font-size: 11px;
+    color: #888;
+    margin-top: 3px;
+}
+
+.source-card .source-preview {
+    font-size: 12px;
+    color: #666;
+    margin-top: 6px;
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+/* ── Modal ─────────────────────────────────────── */
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+}
+
+.modal-box {
+    background: white;
+    border-radius: 10px;
+    width: 600px;
+    max-width: 90vw;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    overflow: hidden;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 18px;
+    border-bottom: 1px solid #eee;
+    font-size: 14px;
+    font-weight: bold;
+    color: #333;
+}
+
+.modal-close {
+    background: none;
+    border: none;
+    font-size: 18px;
+    cursor: pointer;
+    color: #888;
+    padding: 0 4px;
+    line-height: 1;
+}
+
+.modal-close:hover {
+    color: #333;
+}
+
+.modal-score {
+    padding: 6px 18px;
+    font-size: 12px;
+    color: #888;
+    background: #fafafa;
+    border-bottom: 1px solid #eee;
+}
+
+#modalContent {
+    padding: 16px 18px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: #333;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-y: auto;
+    flex: 1;
+}
+
+/* ── Responsive ────────────────────────────────── */
+@media (max-width: 700px) {
+    .layout {
+        flex-direction: column;
+    }
+    .sources-panel {
+        width: 100%;
+    }
 }

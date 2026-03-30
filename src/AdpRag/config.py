@@ -65,8 +65,5 @@ MAX_QUERIES_PER_ITERATION = 2
 # CrossEncoder score reflects query-chunk relevance.
 # Quality score reflects document trustworthiness (pre-computed at ingestion).
 
-# Cross encoder returns value [-10,10]
-# Quality score is [0,1], so we give it more weight to have a stronger impact on final ranking.
-
 CROSS_ENCODER_WEIGHT = 0.7
-QUALITY_SCORE_WEIGHT = 3
+QUALITY_SCORE_WEIGHT = 0.3
