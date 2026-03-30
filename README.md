@@ -17,6 +17,11 @@ Send a natural language question to the API. The system:
 If the answer is not in the documents, the system explicitly says so — it does not hallucinate.
 
 ---
+## Results
+
+![Pozitivni rezultat](results/found_in_documents.png)
+![Negativni rezultat](results/not_in_documents.png)
+---
 
 ## Architecture Overview
 
