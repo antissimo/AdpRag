@@ -3,11 +3,11 @@ uvicorn
 langchain
 langchain-community
 langchain-chroma
+langchain-experimental
+langchain-huggingface
 sentence-transformers
 chromadb
-requests
-python-dotenv
 unstructured
 markdown
-langchain_experimental
-langchain_huggingface
+pytest
+httpx
