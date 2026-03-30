@@ -1,10 +1,10 @@
-const askBtn       = document.getElementById("askBtn");
+const askBtn        = document.getElementById("askBtn");
 const questionInput = document.getElementById("question");
-const answerDiv    = document.getElementById("answer");
-const stepsDiv     = document.getElementById("steps");
-const stepsDetails = document.getElementById("stepsDetails");
-const sourcesList  = document.getElementById("sourcesList");
-const sourcesEmpty = document.getElementById("sourcesEmpty");
+const answerDiv     = document.getElementById("answer");
+const stepsDiv      = document.getElementById("steps");
+const stepsDetails  = document.getElementById("stepsDetails");
+const sourcesList   = document.getElementById("sourcesList");
+const sourcesEmpty  = document.getElementById("sourcesEmpty");
 
 // ── Modal elements ────────────────────────────────────────────────────────
 const modal        = document.getElementById("modal");
@@ -13,59 +13,103 @@ const modalScore   = document.getElementById("modalScore");
 const modalContent = document.getElementById("modalContent");
 const modalClose   = document.getElementById("modalClose");
 
-// ── Source cards storage (full chunk text) ────────────────────────────────
+// ── State ─────────────────────────────────────────────────────────────────
 let sourcesData = [];
 
-// ── Ask ───────────────────────────────────────────────────────────────────
+// ── Ask (SSE streaming) ───────────────────────────────────────────────────
 askBtn.addEventListener("click", async () => {
     const question = questionInput.value.trim();
     if (!question) return alert("Please type a question!");
 
-    askBtn.disabled = true;
-    askBtn.textContent = "Loading...";
+    // Reset UI
+    askBtn.disabled     = true;
+    askBtn.textContent  = "Loading...";
     answerDiv.innerHTML = "<em style='color:#aaa'>Thinking...</em>";
-    sourcesList.innerHTML = "";
-    sourcesEmpty.style.display = "block";
+    stepsDiv.innerHTML  = "";
     stepsDetails.style.display = "none";
+    sourcesList.innerHTML      = "";
+    sourcesEmpty.style.display = "block";
     sourcesData = [];
 
     try {
-        const response = await fetch("http://localhost:8000/ask", {
-            method: "POST",
+        const response = await fetch("http://localhost:8000/ask/stream", {
+            method:  "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ question }),
+            body:    JSON.stringify({ question }),
         });
 
-        const data = await response.json();
-
         if (!response.ok) {
-            answerDiv.innerHTML = `<span style="color:red">Error ${response.status}: ${data.detail || "Unknown error"}</span>`;
+            const err = await response.json();
+            answerDiv.innerHTML = `<span style="color:red">Error ${response.status}: ${err.detail || "Unknown error"}</span>`;
             return;
         }
 
-        // ── Answer ────────────────────────────────────────────────────────
-        answerDiv.innerHTML = `<strong>Answer:</strong><br>${data.answer}`;
+        // ── Read SSE stream ───────────────────────────────────────────────
+        const reader  = response.body.getReader();
+        const decoder = new TextDecoder();
+        let   buffer  = "";
 
-        // ── Steps ─────────────────────────────────────────────────────────
-        if (data.steps && data.steps.length > 0) {
-            stepsDiv.innerHTML = data.steps.join("<br>");
-            stepsDetails.style.display = "block";
-        }
+        stepsDetails.style.display = "block";
 
-        // ── Sources ───────────────────────────────────────────────────────
-        if (data.sources && data.sources.length > 0) {
-            sourcesEmpty.style.display = "none";
-            sourcesData = data.sources;
-            renderSourceCards(data.sources);
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+
+            // SSE messages are separated by double newline
+            const parts = buffer.split("\n\n");
+            buffer = parts.pop(); // keep incomplete last part
+
+            for (const part of parts) {
+                const line = part.trim();
+                if (!line.startsWith("data:")) continue;
+
+                try {
+                    const payload = JSON.parse(line.slice(5).trim());
+                    handleEvent(payload);
+                } catch (e) {
+                    console.warn("Failed to parse SSE payload:", line, e);
+                }
+            }
         }
 
     } catch (err) {
         answerDiv.innerHTML = `<span style="color:red">Error: ${err.message}</span>`;
     } finally {
-        askBtn.disabled = false;
+        askBtn.disabled    = false;
         askBtn.textContent = "Ask";
     }
 });
+
+// ── Handle incoming SSE events ────────────────────────────────────────────
+function handleEvent(payload) {
+    if (payload.type === "step") {
+        appendStep(payload.text);
+    } else if (payload.type === "done") {
+        renderAnswer(payload);
+    }
+}
+
+// ── Append a single step line ─────────────────────────────────────────────
+function appendStep(text) {
+    const line = document.createElement("div");
+    line.textContent = text;
+    stepsDiv.appendChild(line);
+    stepsDiv.scrollTop = stepsDiv.scrollHeight;
+}
+
+// ── Render final answer + sources ─────────────────────────────────────────
+function renderAnswer(payload) {
+    const formatted = payload.answer.replace(/\n/g, "<br>");
+    answerDiv.innerHTML = `<strong>Answer:</strong><br>${formatted}`;
+
+    if (payload.sources && payload.sources.length > 0) {
+        sourcesEmpty.style.display = "none";
+        sourcesData = payload.sources;
+        renderSourceCards(payload.sources);
+    }
+}
 
 // ── Render source cards ───────────────────────────────────────────────────
 function renderSourceCards(sources) {
@@ -85,13 +129,11 @@ function renderSourceCards(sources) {
 
 // ── Modal ─────────────────────────────────────────────────────────────────
 function openModal(index) {
-    const src = sourcesData[index];
-    modalTitle.textContent = src.document;
-    //modalScore.textContent = `Relevance score: ${src.relevance_score ?? "—"}`;
-    // chunk_preview is the full text passed from API (120 chars preview)
-    // show full content if available, otherwise preview
+    const src                = sourcesData[index];
+    modalTitle.textContent   = src.document;
+    modalScore.textContent   = `Relevance score: ${src.relevance_score ?? "—"}`;
     modalContent.textContent = src.full_text || src.chunk_preview;
-    modal.style.display = "flex";
+    modal.style.display      = "flex";
 }
 
 function closeModal() {
@@ -99,9 +141,5 @@ function closeModal() {
 }
 
 modalClose.addEventListener("click", closeModal);
-modal.addEventListener("click", (e) => {
-    if (e.target === modal) closeModal();
-});
-document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeModal();
-});
+modal.addEventListener("click", (e) => { if (e.target === modal) closeModal(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });

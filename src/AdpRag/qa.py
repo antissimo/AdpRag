@@ -1,3 +1,5 @@
+# src/AdpRag/qa.py
+
 from langchain_core.prompts import PromptTemplate
 from .llm import RAGLLM
 from .logger import FileLogger as log
@@ -11,25 +13,18 @@ class SimpleQAChain:
             template=PROMPT_TEMPLATE,
             input_variables=["context", "question"]
         )
-        log.info("Simple QA chain initialized (no retriever)")
+        log.info("Simple QA chain initialized")
 
     def invoke(self, question: str, docs: list):
-        # Combine documents into context
         context = "\n\n".join([doc.page_content for doc in docs])
-
-        formatted_prompt = self.prompt.format(
-            context=context,
-            question=question
-        )
-
+        formatted_prompt = self.prompt.format(context=context, question=question)
         response = self.llm.invoke(formatted_prompt)
 
         return {
-            "result": response,
-            "source_documents": docs
+            "result":           response.strip(),
+            "source_documents": docs,
         }
 
 
 def create_qa_chain(vectorstore=None):
-    # vectorstore no longer needed, but kept for compatibility
     return SimpleQAChain()
