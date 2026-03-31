@@ -250,7 +250,7 @@ ollama pull mistral
 python scripts/ingestion.py
 
 # Start the API
-uvicorn AdpRag.api:app --reload
+python scripts/run_api.py
 
 # API available at    http://localhost:8000
 # Interactive docs at http://localhost:8000/docs
