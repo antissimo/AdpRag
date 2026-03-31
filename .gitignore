@@ -210,5 +210,4 @@ documents/
 
 logs/
 *.log
-chroma_db/
 
